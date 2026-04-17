@@ -1,6 +1,6 @@
 # MiniChat — Real-Time Messaging Application
 
-A full-stack WhatsApp-style messaging app with real-time chat, media sharing, reactions, group chats, and a premium dark-mode UI.
+A full-stack  messaging app with real-time chat, media sharing, reactions, group chats, and a premium dark-mode UI.
 
 ![MiniChat](https://img.shields.io/badge/MiniChat-Real--Time%20Messaging-00a884?style=for-the-badge)
 
