@@ -60,6 +60,15 @@ const userSchema = new mongoose.Schema(
         addedAt: { type: Date, default: Date.now },
       },
     ],
+    notificationSettings: {
+      enabled: { type: Boolean, default: true },
+      sound: { type: Boolean, default: true },
+      showPreview: { type: Boolean, default: true },
+    },
+    customRingtone: {
+      url: { type: String, default: '' },
+      name: { type: String, default: '' },
+    },
   },
   {
     timestamps: true, // adds createdAt and updatedAt

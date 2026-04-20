@@ -298,6 +298,186 @@ function initializeSocket(io) {
       }
     });
 
+    // --- Voice/Video Calls ---
+
+    /**
+     * Initiate a call (1-on-1 or Group)
+     */
+    socket.on('call:initiate', ({ participants, type, conversationId, isGroup, callId }) => {
+      participants.forEach(participantId => {
+        if (participantId === userId) return;
+        
+        if (onlineUsers.has(participantId)) {
+          onlineUsers.get(participantId).forEach(socketId => {
+            io.to(socketId).emit('call:incoming', {
+              caller: {
+                _id: userId,
+                username: socket.user.username,
+                avatar: socket.user.avatar
+              },
+              type,
+              conversationId,
+              isGroup,
+              callId,
+              participants // include all so others know it's group
+            });
+          });
+        }
+      });
+    });
+
+    /**
+     * Accept a call
+     */
+    socket.on('call:accept', ({ callerId, callId }) => {
+      if (onlineUsers.has(callerId)) {
+        onlineUsers.get(callerId).forEach(socketId => {
+          io.to(socketId).emit('call:accepted', {
+            acceptorId: userId,
+            callId,
+            socketId: socket.id // include acceptor's socketId for WebRTC
+          });
+        });
+      }
+    });
+
+    /**
+     * Reject a call
+     */
+    socket.on('call:reject', ({ callerId, callId, reason }) => {
+      if (onlineUsers.has(callerId)) {
+        onlineUsers.get(callerId).forEach(socketId => {
+          io.to(socketId).emit('call:rejected', {
+            rejectorId: userId,
+            callId,
+            reason: reason || 'rejected'
+          });
+        });
+      }
+    });
+
+    /**
+     * Join a group call (Mesh)
+     */
+    socket.on('call:join', ({ conversationId, callId }) => {
+      socket.join(`call:${callId}`);
+      // Notify others in the room that a new peer has joined
+      socket.to(`call:${callId}`).emit('call:peer-joined', {
+        userId,
+        username: socket.user.username,
+        socketId: socket.id,
+        callId
+      });
+    });
+
+    /**
+     * Pass-through WebRTC Signaling
+     */
+    socket.on('call:signal', ({ to, signal, callId }) => {
+      // 'to' should be a socketId for precision in Mesh
+      io.to(to).emit('call:signal', {
+        from: userId,
+        fromSocketId: socket.id,
+        signal,
+        callId
+      });
+    });
+
+    /**
+     * Toggle media state (mute/camera off) — broadcast to peers
+     */
+    socket.on('call:toggle-media', ({ callId, kind, enabled, participants }) => {
+      // Broadcast to call room for group calls
+      socket.to(`call:${callId}`).emit('call:media-toggled', {
+        userId,
+        kind,
+        enabled,
+        callId
+      });
+      // Also notify by userId for 1-on-1
+      participants?.forEach(pId => {
+        if (pId === userId) return;
+        if (onlineUsers.has(pId)) {
+          onlineUsers.get(pId).forEach(sid => {
+            io.to(sid).emit('call:media-toggled', {
+              userId,
+              kind,
+              enabled,
+              callId
+            });
+          });
+        }
+      });
+    });
+
+    /**
+     * Add a new participant mid-call (upgrade 1-on-1 → group)
+     */
+    socket.on('call:add-participant', ({ callId, newParticipants, type, conversationId, existingParticipants }) => {
+      // Join the call room (if not already)
+      socket.join(`call:${callId}`);
+
+      // Send incoming call to each new participant
+      newParticipants.forEach(participantId => {
+        if (participantId === userId) return;
+        if (onlineUsers.has(participantId)) {
+          onlineUsers.get(participantId).forEach(sid => {
+            io.to(sid).emit('call:incoming', {
+              caller: {
+                _id: userId,
+                username: socket.user.username,
+                avatar: socket.user.avatar
+              },
+              type,
+              conversationId,
+              isGroup: true,
+              callId,
+              participants: [...(existingParticipants || []), ...newParticipants]
+            });
+          });
+        }
+      });
+
+      // Tell existing peers in the room that new people were invited
+      socket.to(`call:${callId}`).emit('call:participants-updated', {
+        callId,
+        newParticipants,
+        addedBy: userId
+      });
+    });
+
+    /**
+     * End/Leave call — always notifies ALL participants so both sides end
+     */
+    socket.on('call:end', ({ callId, participants, isGroup: isGroupCall }) => {
+      // Leave the call room
+      socket.leave(`call:${callId}`);
+
+      // For group calls, just notify the room that this peer left
+      if (isGroupCall) {
+        io.to(`call:${callId}`).emit('call:peer-left', {
+          userId,
+          socketId: socket.id,
+          callId
+        });
+      }
+
+      // ALWAYS notify all listed participants directly that this user ended/left
+      // This ensures 1-on-1 calls always end on both sides
+      participants?.forEach(pId => {
+        if (pId === userId) return;
+        if (onlineUsers.has(pId)) {
+          onlineUsers.get(pId).forEach(sid => {
+            io.to(sid).emit('call:ended', {
+              endedBy: userId,
+              callId,
+              isGroup: isGroupCall || false
+            });
+          });
+        }
+      });
+    });
+
     // --- Disconnect ---
     socket.on('disconnect', async () => {
       console.log(`🔌 User disconnected: ${socket.user.username}`);

@@ -2,10 +2,13 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import EmojiPicker from 'emoji-picker-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
+import { useCall } from '../contexts/CallContext';
+import { useTheme } from '../contexts/ThemeContext';
 import chatService from '../services/chatService';
 import userService from '../services/userService';
 import { formatMessageTime, formatConversationTime, formatDateSeparator, formatFileSize, formatLastSeen } from '../utils/formatDate';
 import { API_URL } from '../services/api';
+import notificationService from '../services/notificationService';
 
 // ============ SVG Icons (inline for zero dependencies) ============
 const Icons = {
@@ -66,6 +69,27 @@ const Icons = {
   SidebarToggle: () => (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
   ),
+  Phone: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+  ),
+  VideoCall: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+  ),
+  Sun: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+  ),
+  Moon: () => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  ),
+  Switch: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>
+  ),
+  Play: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+  ),
+  Stop: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+  ),
 };
 
 // Quick reactions
@@ -92,6 +116,7 @@ function Avatar({ username, avatar, size = '' }) {
 export default function Chat() {
   const { user, logout } = useAuth();
   const { socket, isUserOnline } = useSocket();
+  const { initiateCall, callState } = useCall();
 
   // State
   const [conversations, setConversations] = useState([]);
@@ -134,6 +159,11 @@ export default function Chat() {
   useEffect(() => {
     loadConversations();
     loadContacts();
+    
+    // Request notification permission if enabled in settings
+    if (user?.notificationSettings?.enabled) {
+      notificationService.requestPermission();
+    }
   }, []);
 
   const loadContacts = async () => {
@@ -246,6 +276,9 @@ export default function Chat() {
 
     // New message received
     const handleMessage = ({ message, conversationId }) => {
+      const isWindowHidden = document.hidden;
+      const isDifferentConversation = activeConversation?._id !== conversationId;
+
       if (activeConversation?._id === conversationId) {
         setMessages((prev) => {
           // Avoid duplicates
@@ -256,6 +289,20 @@ export default function Chat() {
         // Mark as read if we're in this conversation
         socket.emit('message:read', { conversationId });
         chatService.markAsRead(conversationId).catch(() => {});
+      }
+
+      // Notification Logic
+      if (user?.notificationSettings?.enabled && (isWindowHidden || isDifferentConversation) && message.sender?._id !== user._id) {
+        if (user.notificationSettings.sound) {
+          notificationService.playMessagePing();
+        }
+
+        const conv = conversations.find(c => c._id === conversationId);
+        const name = conv ? (conv.type === 'group' ? conv.groupName : (typeof message.sender === 'object' ? message.sender.username : 'Someone')) : 'New Message';
+
+        notificationService.notifyMessage(message, name, () => {
+          if (conv) selectConversation(conv);
+        });
       }
     };
 
@@ -932,8 +979,50 @@ export default function Chat() {
                       : formatLastSeen(getOtherParticipant(activeConversation)?.lastSeen)
                     : `${activeConversation.participants?.length || 0} members`}
                 </div>
+                </div>
+
+                {/* Call buttons */}
+                <div className="chat-header-actions">
+                  <button
+                    className="icon-btn"
+                    title="Audio Call"
+                    id="audio-call-btn"
+                    disabled={callState !== 'idle'}
+                    onClick={() => {
+                      if (activeConversation.type === 'private') {
+                        const other = getOtherParticipant(activeConversation);
+                        if (other) initiateCall([other._id], 'audio', activeConversation._id, false, other);
+                      } else {
+                        const otherIds = activeConversation.participants
+                          .filter(p => p._id !== user._id)
+                          .map(p => p._id);
+                        initiateCall(otherIds, 'audio', activeConversation._id, true);
+                      }
+                    }}
+                  >
+                    <Icons.Phone />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title="Video Call"
+                    id="video-call-btn"
+                    disabled={callState !== 'idle'}
+                    onClick={() => {
+                      if (activeConversation.type === 'private') {
+                        const other = getOtherParticipant(activeConversation);
+                        if (other) initiateCall([other._id], 'video', activeConversation._id, false, other);
+                      } else {
+                        const otherIds = activeConversation.participants
+                          .filter(p => p._id !== user._id)
+                          .map(p => p._id);
+                        initiateCall(otherIds, 'video', activeConversation._id, true);
+                      }
+                    }}
+                  >
+                    <Icons.VideoCall />
+                  </button>
+                </div>
               </div>
-            </div>
 
             {/* Messages */}
             <div className="messages-container" id="messages-container">
@@ -1248,7 +1337,7 @@ export default function Chat() {
             {showEmojiPicker && (
               <div className="emoji-picker-wrapper">
                 <EmojiPicker
-                  theme="dark"
+                  theme={theme}
                   onEmojiClick={(emojiData) => {
                     setMessageInput((prev) => prev + emojiData.emoji);
                   }}
@@ -1267,6 +1356,7 @@ export default function Chat() {
         <ChatInfo
           conversation={activeConversation}
           user={user}
+          className="glass-panel"
           onClose={() => setShowChatInfo(false)}
           isContact={isContact}
           onAddContact={handleAddContact}
@@ -1578,9 +1668,22 @@ function GroupModal({ onClose, onCreated, isUserOnline }) {
  * ProfileModal — view and edit user profile settings.
  */
 function ProfileModal({ user, onClose, onUpdate }) {
+  const { theme, toggleTheme } = useTheme();
+  const { logout } = useAuth();
   const [username, setUsername] = useState(user?.username || '');
   const [about, setAbout] = useState(user?.about || '');
   const [avatar, setAvatar] = useState(user?.avatar || '');
+  
+  // Notification states
+  const [notifyEnabled, setNotifyEnabled] = useState(user?.notificationSettings?.enabled ?? true);
+  const [notifySound, setNotifySound] = useState(user?.notificationSettings?.sound ?? true);
+  const [notifyPreview, setNotifyPreview] = useState(user?.notificationSettings?.showPreview ?? true);
+  
+  // Ringtone states
+  const [customRingtone, setCustomRingtone] = useState(user?.customRingtone || { url: '', name: '' });
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const ringtoneInputRef = useRef(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -1603,6 +1706,40 @@ function ProfileModal({ user, onClose, onUpdate }) {
     }
   };
 
+  const handleRingtoneChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setLoading(true);
+    try {
+      const data = await chatService.uploadFile(file);
+      if (data.success) {
+        setCustomRingtone({
+          url: data.file.url,
+          name: data.file.name,
+        });
+        notificationService.setCallRingtone(data.file.url);
+      }
+    } catch (err) {
+      setError('Failed to upload audio');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleRingtonePreview = () => {
+    if (isPreviewing) {
+      notificationService.stopRingtone();
+      setIsPreviewing(false);
+    } else {
+      notificationService.setCallRingtone(customRingtone.url);
+      notificationService.playRingtone();
+      setIsPreviewing(true);
+      // Auto stop after 10 seconds for preview
+      setTimeout(() => setIsPreviewing(false), 10000);
+    }
+  };
+
   const handleUpdate = async () => {
     if (!username.trim()) return;
 
@@ -1615,10 +1752,17 @@ function ProfileModal({ user, onClose, onUpdate }) {
         username: username.trim(),
         about: about.trim(),
         avatar,
+        notificationSettings: {
+          enabled: notifyEnabled,
+          sound: notifySound,
+          showPreview: notifyPreview,
+        },
+        customRingtone,
       });
 
       if (data.success) {
         onUpdate(data.user);
+        notificationService.setCallRingtone(data.user.customRingtone?.url);
         setSuccess(true);
         setTimeout(() => setSuccess(false), 3000);
       }
@@ -1631,7 +1775,7 @@ function ProfileModal({ user, onClose, onUpdate }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content profile-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content profile-modal glass-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>Profile Settings</h3>
           <button className="icon-btn" onClick={onClose}>
@@ -1680,6 +1824,125 @@ function ProfileModal({ user, onClose, onUpdate }) {
               onChange={(e) => setAbout(e.target.value)}
               placeholder="Tell us about yourself"
             />
+          </div>
+
+          <div className="theme-settings-section">
+            <label className="text-xs font-bold uppercase tracking-wider text-tertiary mb-3 block">
+              Notifications
+            </label>
+            
+            <div className="settings-toggle-row">
+              <div className="theme-info">
+                <div className="font-semibold">Desktop Notifications</div>
+                <div className="text-xs text-secondary">Show alerts when messages arrive</div>
+              </div>
+              <div 
+                className={`theme-switch ${notifyEnabled ? 'dark' : 'light'}`} 
+                onClick={() => {
+                  setNotifyEnabled(!notifyEnabled);
+                  if (!notifyEnabled) notificationService.requestPermission();
+                }}
+              >
+                <div className="switch-handle" />
+              </div>
+            </div>
+
+            <div className="settings-toggle-row">
+              <div className="theme-info">
+                <div className="font-semibold">Notification Sound</div>
+                <div className="text-xs text-secondary">Play a sound for new messages and calls</div>
+              </div>
+              <div 
+                className={`theme-switch ${notifySound ? 'dark' : 'light'}`} 
+                onClick={() => setNotifySound(!notifySound)}
+              >
+                <div className="switch-handle" />
+              </div>
+            </div>
+
+            <div className="settings-toggle-row no-hover">
+              <div className="theme-info">
+                <div className="font-semibold">Call Ringtone</div>
+                <div className="text-xs text-secondary">
+                  {customRingtone.url ? `Custom: ${customRingtone.name}` : 'Default Midnight Ringtone'}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  className="icon-btn-sm" 
+                  onClick={toggleRingtonePreview}
+                  title="Preview Ringtone"
+                >
+                  {isPreviewing ? <Icons.Stop /> : <Icons.Play />}
+                </button>
+                <button 
+                  className="btn-text-primary text-xs"
+                  onClick={() => ringtoneInputRef.current?.click()}
+                >
+                  Change
+                </button>
+                {customRingtone.url && (
+                  <button 
+                    className="btn-text-danger text-xs"
+                    onClick={() => {
+                      setCustomRingtone({ url: '', name: '' });
+                      notificationService.setCallRingtone('');
+                    }}
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+              <input 
+                type="file" 
+                ref={ringtoneInputRef} 
+                className="hidden" 
+                onChange={handleRingtoneChange}
+                accept="audio/*"
+              />
+            </div>
+          </div>
+
+          <div className="theme-settings-section">
+            <label className="text-xs font-bold uppercase tracking-wider text-tertiary mb-3 block">
+              Appearance
+            </label>
+            <div className="theme-toggle-card" onClick={toggleTheme}>
+              <div className="theme-info">
+                {theme === 'dark' ? <Icons.Moon /> : <Icons.Sun />}
+                <div className="ml-3">
+                  <div className="font-semibold">{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</div>
+                  <div className="text-xs text-secondary">Switch to {theme === 'dark' ? 'light' : 'dark'} theme</div>
+                </div>
+              </div>
+              <div className={`theme-switch ${theme}`}>
+                <div className="switch-handle" />
+              </div>
+            </div>
+          </div>
+
+          <div className="theme-settings-section">
+            <label className="text-xs font-bold uppercase tracking-wider text-tertiary mb-3 block">
+              Account
+            </label>
+            <div className="settings-toggle-row danger-hover" onClick={logout}>
+              <div className="theme-info">
+                <Icons.Switch />
+                <div className="ml-3">
+                  <div className="font-semibold">Switch Account</div>
+                  <div className="text-xs text-secondary">Log out and sign in with another account</div>
+                </div>
+              </div>
+            </div>
+            <div className="settings-toggle-row danger-hover" onClick={logout}>
+              <div className="theme-info">
+                <Icons.Logout />
+                <div className="ml-3">
+                  <div className="font-semibold text-danger">Sign Out</div>
+                  <div className="text-xs text-secondary">Securely log out of your current session</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {error && <div className="error-message">{error}</div>}

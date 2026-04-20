@@ -1,7 +1,10 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { SocketProvider } from './contexts/SocketContext';
+import { CallProvider } from './contexts/CallContext';
+import CallUI from './components/CallUI';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Chat from './pages/Chat';
@@ -67,7 +70,11 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SocketProvider>
-              <Chat />
+              <CallProvider>
+                <Chat />
+                {/* Global call UI — incoming/active calls overlay the whole app */}
+                <CallUI />
+              </CallProvider>
             </SocketProvider>
           </ProtectedRoute>
         }
@@ -80,9 +87,11 @@ function AppRoutes() {
 export default function App() {
   return (
     <Router>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </ThemeProvider>
     </Router>
   );
 }

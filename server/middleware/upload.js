@@ -48,6 +48,9 @@ const fileFilter = (req, file, cb) => {
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/zip',
     'text/plain',
+    'audio/mpeg',
+    'audio/wav',
+    'audio/ogg',
   ];
 
   if (allowedTypes.includes(file.mimetype)) {

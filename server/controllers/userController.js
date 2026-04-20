@@ -86,7 +86,7 @@ exports.updateUser = async (req, res) => {
       });
     }
 
-    const allowedFields = ['username', 'about', 'avatar'];
+    const allowedFields = ['username', 'about', 'avatar', 'notificationSettings', 'customRingtone'];
     const updates = {};
 
     for (const field of allowedFields) {
