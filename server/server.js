@@ -99,14 +99,17 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
-  console.log(`
+// Only start the server if not being imported (e.g., by Vercel)
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`
   ╔══════════════════════════════════════════╗
   ║     🚀 MiniChat Server Running          ║
   ║     Port: ${PORT}                          ║
   ║     Mode: ${process.env.NODE_ENV || 'development'}               ║
   ╚══════════════════════════════════════════╝
-  `);
-});
+    `);
+  });
+}
 
-module.exports = { app, server, io };
+module.exports = app;

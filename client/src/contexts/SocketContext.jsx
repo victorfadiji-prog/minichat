@@ -28,7 +28,8 @@ export function SocketProvider({ children }) {
     }
 
     // Create socket connection
-    const newSocket = io('http://localhost:5000', {
+    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || window.location.origin;
+    const newSocket = io(SOCKET_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
       reconnection: true,
