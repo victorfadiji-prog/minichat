@@ -1,82 +1,99 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
-import { io } from 'socket.io-client';
+import { supabase } from '../supabaseClient';
 import { useAuth } from './AuthContext';
 
 const SocketContext = createContext(null);
 
 /**
- * SocketProvider — manages Socket.io connection lifecycle.
- * Connects when authenticated, disconnects on logout.
+ * SocketProvider — manages Supabase Realtime connection lifecycle.
+ * Replaces Socket.io with Supabase Channels and Presence.
  */
 export function SocketProvider({ children }) {
-  const { token, isAuthenticated, user } = useAuth();
-  const [socket, setSocket] = useState(null);
+  const { isAuthenticated, user } = useAuth();
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [connected, setConnected] = useState(false);
-  const socketRef = useRef(null);
+  const channelRef = useRef(null);
 
   useEffect(() => {
-    if (!isAuthenticated || !token) {
-      // Disconnect if logged out
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-        setSocket(null);
-        setConnected(false);
+    if (!isAuthenticated || !user) {
+      if (channelRef.current) {
+        channelRef.current.unsubscribe();
+        channelRef.current = null;
       }
+      setConnected(false);
       return;
     }
 
-    // Create socket connection
-    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || window.location.origin;
-    const newSocket = io(SOCKET_URL, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
+    // 1. Initialize Realtime Channel
+    const channel = supabase.channel('global_chat_room', {
+      config: {
+        presence: {
+          key: user.id,
+        },
+      },
     });
 
-    newSocket.on('connect', () => {
-      console.log('🔌 Socket connected:', newSocket.id);
-      setConnected(true);
-    });
-
-    newSocket.on('disconnect', (reason) => {
-      console.log('🔌 Socket disconnected:', reason);
-      setConnected(false);
-    });
-
-    newSocket.on('connect_error', (err) => {
-      console.error('Socket connection error:', err.message);
-      setConnected(false);
-    });
-
-    // Track online users
-    newSocket.on('users:online', (userIds) => {
-      setOnlineUsers(new Set(userIds));
-    });
-
-    newSocket.on('user:online', ({ userId, status }) => {
-      setOnlineUsers((prev) => {
-        const updated = new Set(prev);
-        if (status === 'online') {
-          updated.add(userId);
-        } else {
-          updated.delete(userId);
-        }
-        return updated;
+    // 2. Handle Presence (Online/Offline)
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const newState = channel.presenceState();
+        const onlineIds = new Set(Object.keys(newState));
+        setOnlineUsers(onlineIds);
+      })
+      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+        console.log('👤 User joined:', key);
+        setOnlineUsers((prev) => new Set([...prev, key]));
+      })
+      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+        console.log('👤 User left:', key);
+        setOnlineUsers((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
       });
+
+    // 3. Listen for Database Changes (Messages)
+    // This replaces 'message:received' socket event
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      },
+      (payload) => {
+        console.log('📩 New message received via Realtime:', payload.new);
+        // We can dispatch a custom event or use a callback pattern here
+        const event = new CustomEvent('new_message', { detail: payload.new });
+        window.dispatchEvent(event);
+      }
+    );
+
+    // 4. Subscribe
+    channel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        setConnected(true);
+        console.log('🔌 Supabase Realtime connected');
+        
+        // Track presence
+        await channel.track({
+          online_at: new Date().toISOString(),
+          username: user.username,
+        });
+      } else {
+        setConnected(false);
+      }
     });
 
-    socketRef.current = newSocket;
-    setSocket(newSocket);
+    channelRef.current = channel;
 
     return () => {
-      newSocket.disconnect();
-      socketRef.current = null;
+      if (channelRef.current) {
+        channelRef.current.unsubscribe();
+      }
     };
-  }, [isAuthenticated, token]);
+  }, [isAuthenticated, user]);
 
   const isUserOnline = useCallback(
     (userId) => onlineUsers.has(userId),
@@ -84,7 +101,7 @@ export function SocketProvider({ children }) {
   );
 
   const value = {
-    socket,
+    socket: channelRef.current, // Providing the channel as the 'socket' object
     connected,
     onlineUsers,
     isUserOnline,

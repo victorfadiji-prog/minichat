@@ -1,67 +1,128 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import authService from '../services/authService';
+import { supabase } from '../supabaseClient';
 
 const AuthContext = createContext(null);
 
 /**
- * AuthProvider — manages authentication state.
- * Provides user, token, login, register, logout to all children.
+ * AuthProvider — manages authentication state using Supabase Auth.
+ * Provides user, session, login, register, logout to all children.
  */
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => authService.getUser());
-  const [token, setToken] = useState(() => authService.getToken());
+  const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Verify token on mount
+  // Fetch profile details from the profiles table
+  const fetchProfile = async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      return null;
+    }
+  };
+
   useEffect(() => {
-    const verifyAuth = async () => {
-      if (token) {
-        try {
-          const data = await authService.getMe();
-          if (data.success) {
-            setUser(data.user);
-            localStorage.setItem('minichat_user', JSON.stringify(data.user));
-          } else {
-            handleLogout();
-          }
-        } catch {
-          handleLogout();
-        }
+    // Check active sessions and sets up the listener
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) {
+        fetchProfile(session.user.id).then(profile => {
+          setUser({ ...session.user, ...profile });
+          setLoading(false);
+        });
+      } else {
+        setLoading(false);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setSession(session);
+      if (session?.user) {
+        const profile = await fetchProfile(session.user.id);
+        setUser({ ...session.user, ...profile });
+      } else {
+        setUser(null);
       }
       setLoading(false);
-    };
-    verifyAuth();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const handleLogin = useCallback(async (email, password) => {
-    const data = await authService.login(email, password);
-    if (data.success) {
-      setUser(data.user);
-      setToken(data.token);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
     }
-    return data;
+
+    return { success: true, user: data.user };
   }, []);
 
   const handleRegister = useCallback(async (username, email, password) => {
-    const data = await authService.register(username, email, password);
-    if (data.success) {
-      setUser(data.user);
-      setToken(data.token);
+    // 1. Sign up user
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { username } // Stored in auth.users metadata
+      }
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
     }
-    return data;
+
+    // 2. Insert into profiles table
+    // Note: In a production app, you might use a Postgres Trigger to do this automatically.
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .insert([
+        { 
+          id: data.user.id, 
+          username, 
+          email,
+          status: 'online' 
+        }
+      ]);
+
+    if (profileError) {
+      console.error('Profile creation error:', profileError);
+      // Even if profile fails, user was created in Auth
+    }
+
+    return { success: true, user: data.user };
   }, []);
 
   const handleLogout = useCallback(async () => {
-    await authService.logout();
-    setUser(null);
-    setToken(null);
-  }, []);
+    // Set offline in DB before logout
+    if (user) {
+      await supabase
+        .from('profiles')
+        .update({ status: 'offline', last_seen: new Date() })
+        .eq('id', user.id);
+    }
+    
+    await supabase.auth.signOut();
+  }, [user]);
 
   const value = {
     user,
-    token,
+    session,
+    token: session?.access_token,
     loading,
-    isAuthenticated: !!token && !!user,
+    isAuthenticated: !!session?.user,
     login: handleLogin,
     register: handleRegister,
     logout: handleLogout,

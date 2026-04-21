@@ -1,27 +1,74 @@
-import api from './api';
+import { supabase } from '../supabaseClient';
 
 /**
- * Call service — create, update, and fetch call records.
+ * Call service — create, update, and fetch call records using Supabase.
  */
 const callService = {
-  async getCallHistory() {
-    const res = await api.get('/calls');
-    return res.data;
+  async getCallHistory(userId) {
+    const { data, error } = await supabase
+      .from('calls')
+      .select('*')
+      .contains('participants', [userId])
+      .order('started_at', { ascending: false });
+
+    if (error) throw error;
+    return { success: true, calls: data.map(c => ({
+      ...c,
+      startedAt: c.started_at,
+      endedAt: c.ended_at,
+      isGroup: c.is_group
+    })) };
   },
 
   async getCall(callId) {
-    const res = await api.get(`/calls/${callId}`);
-    return res.data;
+    const { data, error } = await supabase
+      .from('calls')
+      .select('*')
+      .eq('id', callId)
+      .single();
+
+    if (error) throw error;
+    return { success: true, call: {
+      ...data,
+      startedAt: data.started_at,
+      endedAt: data.ended_at,
+      isGroup: data.is_group
+    } };
   },
 
-  async createCall({ participants, type, conversation, isGroup }) {
-    const res = await api.post('/calls', { participants, type, conversation, isGroup });
-    return res.data;
+  async createCall({ participants, type, conversation, isGroup, callerId }) {
+    const { data, error } = await supabase
+      .from('calls')
+      .insert([{ 
+        participants, 
+        type, 
+        conversation_id: conversation, 
+        is_group: isGroup,
+        caller_id: callerId,
+        status: 'ongoing'
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, call: data };
   },
 
   async updateCall(callId, { status, duration }) {
-    const res = await api.put(`/calls/${callId}`, { status, duration });
-    return res.data;
+    const updateData = { status, duration };
+    if (status === 'completed' || status === 'rejected' || status === 'missed') {
+      updateData.ended_at = new Date();
+    }
+
+    const { data, error } = await supabase
+      .from('calls')
+      .update(updateData)
+      .eq('id', callId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, call: data };
   },
 };
 
