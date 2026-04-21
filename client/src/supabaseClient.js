@@ -3,12 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || supabaseUrl === 'YOUR_SUPABASE_URL') {
-  console.error('❌ Supabase URL is missing! Check your Vercel Environment Variables.');
-}
-
-if (!supabaseAnonKey || supabaseAnonKey === 'YOUR_SUPABASE_ANON_KEY') {
-  console.error('❌ Supabase Anon Key is missing! Check your Vercel Environment Variables.');
+// Diagnostic Alert (Only shows in production if there is an issue)
+if (typeof window !== 'undefined' && (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('YOUR_'))) {
+  const msg = `⚠️ Supabase Config Issue!\n\nURL: ${supabaseUrl || 'MISSING'}\nKey: ${supabaseAnonKey ? supabaseAnonKey.substring(0, 10) + '...' : 'MISSING'}\n\nCheck Vercel Settings!`;
+  console.error(msg);
+  // Uncomment the line below if you want the popup to appear on the screen:
+  // alert(msg); 
 }
 
 /**
