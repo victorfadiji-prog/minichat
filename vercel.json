@@ -14,23 +14,15 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/server/server.js"
+      "destination": "server/server.js"
     },
     {
       "source": "/uploads/(.*)",
-      "destination": "/server/server.js"
-    },
-    {
-      "source": "/assets/(.*)",
-      "destination": "/client/assets/$1"
+      "destination": "server/server.js"
     },
     {
       "source": "/(.*)",
-      "destination": "/client/$1"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/client/index.html"
+      "destination": "client/$1"
     }
   ]
 }

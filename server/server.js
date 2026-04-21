@@ -99,8 +99,8 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-// Only start the server if not being imported (e.g., by Vercel)
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+// Only start the server if not running on Vercel
+if (!process.env.VERCEL) {
   server.listen(PORT, () => {
     console.log(`
   ╔══════════════════════════════════════════╗

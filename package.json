@@ -1,0 +1,11 @@
+{
+  "name": "minichat-root",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "install-all": "npm install && cd client && npm install && cd ../server && npm install",
+    "build": "cd client && npm install && npm run build",
+    "server": "cd server && npm start",
+    "client": "cd client && npm run dev"
+  }
+}
