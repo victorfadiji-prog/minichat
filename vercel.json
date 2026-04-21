@@ -11,30 +11,26 @@
       "use": "@vercel/node"
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "server/server.js"
+      "source": "/api/(.*)",
+      "destination": "/server/server.js"
     },
     {
-      "src": "/uploads/(.*)",
-      "dest": "server/server.js"
+      "source": "/uploads/(.*)",
+      "destination": "/server/server.js"
     },
     {
-      "src": "/assets/(.*)",
-      "dest": "client/assets/$1"
+      "source": "/assets/(.*)",
+      "destination": "/client/assets/$1"
     },
     {
-      "src": "/(.*)",
-      "dest": "client/$1",
-      "continue": true
+      "source": "/(.*)",
+      "destination": "/client/$1"
     },
     {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "client/index.html"
+      "source": "/(.*)",
+      "destination": "/client/index.html"
     }
   ]
 }
