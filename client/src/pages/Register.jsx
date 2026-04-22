@@ -17,6 +17,8 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
+    
     setError('');
 
     if (password !== confirmPassword) {
@@ -33,11 +35,22 @@ export default function Register() {
 
     try {
       const data = await register(username, email, password);
+      
       if (!data.success) {
-        setError(data.message || 'Registration failed');
+        // Handle common Supabase error patterns
+        let msg = data.message || 'Registration failed';
+        
+        if (msg.includes('security purposes')) {
+          msg = 'Slow down! ' + msg;
+        } else if (msg.includes('User already registered')) {
+          msg = 'An account with this email already exists.';
+        }
+        
+        setError(msg);
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Something went wrong');
+      console.error('Registration error:', err);
+      setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }

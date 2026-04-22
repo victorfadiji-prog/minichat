@@ -30,31 +30,70 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
-    // Check active sessions and sets up the listener
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        fetchProfile(session.user.id).then(profile => {
-          setUser({ ...session.user, ...profile });
+    let mounted = true;
+
+    const initializeAuth = async () => {
+      console.log('🔐 Initializing Auth...');
+      try {
+        // 1. Check active session with a timeout to prevent infinite hang
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Auth Timeout')), 5000)
+        );
+
+        const { data: { session }, error: sessionError } = await Promise.race([
+          sessionPromise,
+          timeoutPromise
+        ]);
+        
+        if (sessionError) throw sessionError;
+
+        if (mounted) {
+          setSession(session);
+          if (session?.user) {
+            console.log('👤 User session found, fetching profile...');
+            const profile = await fetchProfile(session.user.id);
+            setUser({ ...session.user, ...profile });
+          } else {
+            console.log('ℹ️ No active session found.');
+          }
+        }
+      } catch (error) {
+        console.error('⚠️ Auth initialization failed or timed out:', error);
+      } finally {
+        if (mounted) {
+          console.log('✅ Auth initialization complete.');
           setLoading(false);
-        });
-      } else {
+        }
+      }
+    };
+
+    initializeAuth();
+
+    // Set up auth listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      console.log('🔄 Auth state changed:', _event);
+      if (!mounted) return;
+
+      try {
+        setSession(session);
+        if (session?.user) {
+          const profile = await fetchProfile(session.user.id);
+          setUser({ ...session.user, ...profile });
+        } else {
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('⚠️ Auth change handler failed:', error);
+      } finally {
         setLoading(false);
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      if (session?.user) {
-        const profile = await fetchProfile(session.user.id);
-        setUser({ ...session.user, ...profile });
-      } else {
-        setUser(null);
-      }
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      if (subscription) subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogin = useCallback(async (email, password) => {
